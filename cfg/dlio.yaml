@@ -10,15 +10,15 @@
 #                                                         #
 ###########################################################
 
-dlio:
+/**:
+  ros__parameters:
 
   version: 1.2.0
 
-  adaptive: true
+    adaptive: true
 
-  pointcloud:
-    deskew: true
-    voxelize: true
+    pointcloud/deskew: true
+    pointcloud/voxelize: true
 
   imu:
     calibration: true
@@ -44,3 +44,11 @@ dlio:
            0.,  1.,  0.,
            0.,  0.,  1. ]
 
+    extrinsics/baselink2imu/t: [ 0., 0., 0. ]
+    extrinsics/baselink2imu/R: [ -1.,  0.,  0.,
+                                  0.,  1.,  0.,
+                                  0.,  0.,  -1. ]
+    extrinsics/baselink2lidar/t: [ 0.,  0.,  0. ]
+    extrinsics/baselink2lidar/R: [ 1.,  0.,  0.,
+                                   0.,  1.,  0.,
+                                   0.,  0.,  1. ]

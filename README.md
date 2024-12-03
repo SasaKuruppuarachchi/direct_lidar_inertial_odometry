@@ -1,6 +1,6 @@
 # Direct LiDAR-Inertial Odometry: Lightweight LIO with Continuous-Time Motion Correction
 
-#### [[Paper](https://arxiv.org/abs/2203.03749)] [[Video](https://www.youtube.com/watch?v=4-oXjG8ow10)] [[Presentation](https://www.youtube.com/watch?v=Hmiw66KZ1tU)]
+#### [[ IEEE ICRA ](https://ieeexplore.ieee.org/document/10160508)] [[ arXiv ](https://arxiv.org/abs/2203.03749)] [[ Video ](https://www.youtube.com/watch?v=4-oXjG8ow10)] [[ Presentation ](https://www.youtube.com/watch?v=Hmiw66KZ1tU)]
 
 DLIO is a new lightweight LiDAR-inertial odometry algorithm with a novel coarse-to-fine approach in constructing continuous-time trajectories for precise motion correction. It features several algorithmic improvements over its predecessor, [DLO](https://github.com/vectr-ucla/direct_lidar_odometry), and was presented at the IEEE International Conference on Robotics and Automation (ICRA) in London, UK in 2023.
 
@@ -23,8 +23,8 @@ Also note that the LiDAR and IMU sensors _need_ to be properly time-synchronized
 ### Dependencies
 The following has been verified to be compatible, although other configurations may work too:
 
-- Ubuntu 20.04
-- ROS Noetic (`roscpp`, `std_msgs`, `sensor_msgs`, `geometry_msgs`, `nav_msgs`, `pcl_ros`)
+- Ubuntu 22.04
+- ROS Humble (`rclcpp`, `std_msgs`, `sensor_msgs`, `geometry_msgs`, `nav_msgs`, `pcl_ros`)
 - C++ 14
 - CMake >= `3.12.4`
 - OpenMP >= `4.5`
@@ -35,19 +35,35 @@ The following has been verified to be compatible, although other configurations 
 sudo apt install libomp-dev libpcl-dev libeigen3-dev
 ```
 
-DLIO currently only supports ROS1, but we welcome any contributions by the community to add ROS2 support!
+DLIO currently supports `ROS 1` and `ROS 2`!
 
 ### Compiling
 Compile using the [`catkin_tools`](https://catkin-tools.readthedocs.io/en/latest/) package via:
 
 ```sh
-mkdir ws && cd ws && mkdir src && catkin init && cd src
-git clone https://github.com/vectr-ucla/direct_lidar_inertial_odometry.git
-catkin build
+mkdir ~/ros2_ws && cd ~/ros2_ws && mkdir src && cd src
+```
+```sh
+git clone https://github.com/vectr-ucla/direct_lidar_inertial_odometry -b feature/ros2
+```
+```sh
+cd ~/ros2_ws
+```
+```sh
+colcon build --symlink-install --packages-select direct_lidar_inertial_odometry
 ```
 
 ### Execution
-After compiling, source the workspace and execute via:
+
+<details>
+<summary> After compiling, don't forget to source before ROS commands.</summary>
+
+``` bash
+source ~/ros2_ws/install/setup.bash
+```
+</details>
+
+Execute via:
 
 ```sh
 roslaunch direct_lidar_inertial_odometry dlio.launch \
@@ -55,6 +71,14 @@ roslaunch direct_lidar_inertial_odometry dlio.launch \
   pointcloud_topic:=/robot/lidar \
   imu_topic:=/robot/imu
 ```
+
+<details>
+<summary> Example command: </summary>
+
+``` bash
+ros2 launch direct_lidar_inertial_odometry dlio.launch.py rviz:=true pointcloud_topic:=/lexus3/os_center/points imu_topic:=/lexus3/os_center/imu
+```
+</details>
 
 Be sure to change the topic names to your corresponding topics. Alternatively, edit the launch file directly if desired. If successful, you should see the following output in your terminal:
 <br>
@@ -66,7 +90,7 @@ Be sure to change the topic names to your corresponding topics. Alternatively, e
 To save DLIO's generated map into `.pcd` format, call the following service:
 
 ```sh
-rosservice call /robot/dlio_map/save_pcd LEAF_SIZE SAVE_PATH
+ros2 service call /save_pcd direct_lidar_inertial_odometry/srv/SavePCD "{'leaf_size': 0.2, 'save_path': '~/map'}"
 ```
 
 ### Test Data
@@ -84,8 +108,10 @@ If you found this work useful, please cite our manuscript:
 @article{chen2022dlio,
   title={Direct LiDAR-Inertial Odometry: Lightweight LIO with Continuous-Time Motion Correction},
   author={Chen, Kenny and Nemiroff, Ryan and Lopez, Brett T},
-  journal={IEEE International Conference on Robotics and Automation (ICRA)},
-  year={2023}
+  journal={2023 IEEE International Conference on Robotics and Automation (ICRA)},
+  year={2023},
+  pages={3983-3989},
+  doi={10.1109/ICRA48891.2023.10160508}
 }
 ```
 
