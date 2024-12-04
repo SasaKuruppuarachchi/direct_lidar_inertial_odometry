@@ -12,6 +12,21 @@
 
 cmake_minimum_required(VERSION 3.12.4)
 project(direct_lidar_inertial_odometry)
+add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
+
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -pthread -std=c++0x -std=c++14 -fexceptions")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 find_package(rosidl_default_generators REQUIRED)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -20,19 +35,32 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
+find_package(livox_ros_driver2 REQUIRED)
 
 find_package(PCL REQUIRED)
 find_package( Eigen3 REQUIRED )
 find_package(Threads REQUIRED)
 
-set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 
 # Not all machines have <cpuid.h> available
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+set(dependencies
+  rclcpp
+  rclcpp_components
+  geometry_msgs
+  nav_msgs
+  sensor_msgs
+  std_msgs
+  std_srvs
+  visualization_msgs
+  pcl_ros
+  pcl_conversions
+  livox_ros_driver2
+)
 
 rosidl_generate_interfaces(
     ${PROJECT_NAME}

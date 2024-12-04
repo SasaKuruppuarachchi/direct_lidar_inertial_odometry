@@ -49,8 +49,8 @@ std::string to_string_with_precision(const T a_value, const int n = 6)
 
 // DLIO
 #include <nano_gicp/nano_gicp.h>
-#include <direct_lidar_inertial_odometry/save_pcd.h>
-#include <livox_ros_driver2/CustomMsg.h>
+//#include <direct_lidar_inertial_odometry/save_pcd.h>
+#include <livox_ros_driver2/msg/custom_msg.hpp>
 
 namespace dlio {
   enum class SensorType { OUSTER, VELODYNE, LIVOX, HESAI, UNKNOWN };
