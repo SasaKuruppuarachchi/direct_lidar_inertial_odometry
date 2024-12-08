@@ -20,7 +20,8 @@ def generate_launch_description():
 
     # Set default arguments
     rviz = LaunchConfiguration('rviz', default='true')
-    pointcloud_topic = LaunchConfiguration('pointcloud_topic', default='livox/lidar')
+    use_sim_time = LaunchConfiguration('use_sim_time', default='true')
+    pointcloud_topic = LaunchConfiguration('pointcloud_topic', default='/point_cloud')
     imu_topic = LaunchConfiguration('imu_topic', default='/px4_imu')
 
     # Define arguments
@@ -49,7 +50,7 @@ def generate_launch_description():
         package='direct_lidar_inertial_odometry',
         executable='dlio_odom_node',
         output='screen',
-        parameters=[dlio_yaml_path, dlio_params_yaml_path],
+        parameters=[dlio_yaml_path, dlio_params_yaml_path, use_sim_time],
         remappings=[
             ('pointcloud', pointcloud_topic),
             ('imu', imu_topic),
@@ -67,7 +68,7 @@ def generate_launch_description():
         package='direct_lidar_inertial_odometry',
         executable='dlio_map_node',
         output='screen',
-        parameters=[dlio_yaml_path, dlio_params_yaml_path],
+        parameters=[dlio_yaml_path, dlio_params_yaml_path, use_sim_time],
         remappings=[
             ('keyframes', 'dlio/odom_node/pointcloud/keyframe'),
         ],
