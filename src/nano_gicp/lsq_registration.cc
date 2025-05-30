@@ -130,7 +130,7 @@ void LsqRegistration<PointTarget, PointSource>::computeTransformation(PointCloud
   }
 
   final_transformation_ = x0.cast<float>().matrix();
-  pcl::transformPointCloud(*input_, output, final_transformation_);
+  pcl::transformPointCloud(*input_, output, final_transformation_,false);
 }
 
 template <typename PointTarget, typename PointSource>

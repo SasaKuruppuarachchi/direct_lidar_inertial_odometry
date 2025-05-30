@@ -147,6 +147,7 @@ private:
   std::thread publish_keyframe_thread;
   std::thread metrics_thread;
   std::thread debug_thread;
+  std::mutex mtx_imu_stamp;
 
   // Trajectory
   std::vector<std::pair<Eigen::Vector3f, Eigen::Quaternionf>> trajectory;
@@ -159,6 +160,7 @@ private:
   std::vector<std::shared_ptr<const nano_gicp::CovarianceList>> keyframe_normals;
   std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f>> keyframe_transformations;
   std::mutex keyframes_mutex;
+  int max_keyframes_;
 
   // Sensor Type
   dlio::SensorType sensor;
