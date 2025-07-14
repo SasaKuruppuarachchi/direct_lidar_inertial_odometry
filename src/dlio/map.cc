@@ -11,6 +11,8 @@
  ***********************************************************/
 
 #include "dlio/map.h"
+
+#include <filesystem>
 #include "dlio/utils.h"
 
 dlio::MapNode::MapNode(): Node("dlio_map_node") {
@@ -80,6 +82,12 @@ void dlio::MapNode::savePCD(std::shared_ptr<direct_lidar_inertial_odometry::srv:
 
   float leaf_size = req->leaf_size;
   std::string p = req->save_path;
+
+  if (!std::filesystem::is_directory(p)) {
+    std::cout << "Could not find directory " << p << std::endl;
+    res->success = 0;
+    return;
+  }
 
   std::cout << std::setprecision(2) << "Saving map to " << p + "/dlio_map.pcd"
     << " with leaf size " << to_string_with_precision(leaf_size, 2) << "... "; std::cout.flush();

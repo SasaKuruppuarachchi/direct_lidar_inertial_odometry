@@ -159,6 +159,7 @@ private:
   std::vector<std::shared_ptr<const nano_gicp::CovarianceList>> keyframe_normals;
   std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f>> keyframe_transformations;
   std::mutex keyframes_mutex;
+  int max_keyframes_;
 
   // Sensor Type
   dlio::SensorType sensor;
@@ -310,6 +311,7 @@ private:
   // Parameters
   std::string version_;
   int num_threads_;
+  bool verbose_;
 
   bool deskew_;
 
