@@ -18,18 +18,18 @@
     frames/lidar: lidar
     frames/imu: imu
 
-    map/waitUntilMove: true
+    map/waitUntilMove: true  
     map/dense/filtered: false
     map/sparse/leafSize: 0.5
 
     odom/gravity: 9.80665
     odom/computeTimeOffset: true
 
-    odom/imu/approximateGravity: false
+    odom/imu/approximateGravity: true
     odom/imu/calibration/gyro: true
     odom/imu/calibration/accel: true
     odom/imu/calibration/time: 3.0
-    odom/imu/bufferSize: 5000
+    odom/imu/bufferSize: 2000
 
     odom/preprocessing/cropBoxFilter/size: 1.0
     odom/preprocessing/voxelFilter/res: 0.25
@@ -56,4 +56,4 @@
     odom/geo/abias_max: 5.0
     odom/geo/gbias_max: 0.5
     odom/verbose: false
-    odom/keyframe/maxNum: 50
+    odom/keyframe/maxNum: 100

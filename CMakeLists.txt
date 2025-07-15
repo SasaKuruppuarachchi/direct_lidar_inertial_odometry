@@ -82,7 +82,7 @@ ament_package()
 install( TARGETS dlio_odom_node dlio_map_node
          DESTINATION lib/${PROJECT_NAME} 
 )
-install( DIRECTORY cfg launch
+install( DIRECTORY cfg cfg_car cfg_drone launch
          DESTINATION share/${PROJECT_NAME} 
 )
 

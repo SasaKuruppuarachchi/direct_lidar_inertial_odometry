@@ -305,9 +305,14 @@ void dlio::OdomNode::getParams() {
   dlio::declare_param(this, "odom/geo/abias_max", this->geo_abias_max_, 1.0);
   dlio::declare_param(this, "odom/geo/gbias_max", this->geo_gbias_max_, 1.0);
   dlio::declare_param(this, "odom/keyframe/maxNum", this->max_keyframes_, 20);
+  dlio::declare_param(this, "odom/verbose", this->verbose_, true);
 }
 
 void dlio::OdomNode::start() {
+
+  if (!this->verbose_) {
+    return;
+  }
 
   printf("\033[2J\033[1;1H");
   std::cout << std::endl
@@ -575,7 +580,7 @@ void dlio::OdomNode::preprocessPoints() {
 
     pcl::PointCloud<PointType>::Ptr deskewed_scan_ = std::make_shared<pcl::PointCloud<PointType>>();
     pcl::transformPointCloud (*this->original_scan, *deskewed_scan_,
-                              this->T_prior * this->extrinsics.baselink2lidar_T,false);
+                              this->T_prior * this->extrinsics.baselink2lidar_T, false);
     this->deskewed_scan = deskewed_scan_;
     this->deskew_status = false;
   }
@@ -699,7 +704,7 @@ void dlio::OdomNode::deskewPointcloud() {
     RCLCPP_FATAL(this->get_logger(),"Bad time sync between LiDAR and IMU!");
 
     this->T_prior = this->T;
-    pcl::transformPointCloud (*deskewed_scan_, *deskewed_scan_, this->T_prior * this->extrinsics.baselink2lidar_T,false);
+    pcl::transformPointCloud (*deskewed_scan_, *deskewed_scan_, this->T_prior * this->extrinsics.baselink2lidar_T, false);
     this->deskewed_scan = deskewed_scan_;
     this->deskew_status = false;
     return;
@@ -850,8 +855,10 @@ void dlio::OdomNode::callbackPointCloud(const sensor_msgs::msg::PointCloud2::Sha
   this->gicp_hasConverged = this->gicp.hasConverged();
 
   // Debug statements and publish custom DLIO message
-  this->debug_thread = std::thread( &dlio::OdomNode::debug, this );
-  this->debug_thread.detach();
+  if (this->verbose_) {
+    this->debug_thread = std::thread( &dlio::OdomNode::debug, this );
+    this->debug_thread.detach();
+  }
 
   this->geo.first_opt_done = true;
 
@@ -862,10 +869,7 @@ void dlio::OdomNode::callbackImu(const sensor_msgs::msg::Imu::SharedPtr imu_raw)
   this->first_imu_received = true;
 
   sensor_msgs::msg::Imu::SharedPtr imu = this->transformImu( imu_raw );
-  {
-    std::lock_guard<std::mutex> lock(this->mtx_imu_stamp);
-    this->imu_stamp = imu->header.stamp;
-  }
+  this->imu_stamp = imu->header.stamp;
   double imu_stamp_secs = rclcpp::Time(imu->header.stamp).seconds();
 
   Eigen::Vector3f lin_accel;
@@ -1426,7 +1430,7 @@ void dlio::OdomNode::computeSpaciousness() {
   // compute range of points
   std::vector<float> ds;
 
-  for (int i = 0; i <= this->original_scan->points.size(); i++) {
+  for (int i = 0; i < this->original_scan->points.size(); i++) {
     float d = std::sqrt(pow(this->original_scan->points[i].x, 2) +
                         pow(this->original_scan->points[i].y, 2));
     ds.push_back(d);
@@ -1613,7 +1617,6 @@ void dlio::OdomNode::updateKeyframes() {
     this->keyframe_timestamps.push_back(this->scan_header_stamp);
     this->keyframe_normals.push_back(this->gicp.getSourceCovariances());
     this->keyframe_transformations.push_back(this->T_corr);
-
     // Prune oldest keyframes if over limit
     while (this->keyframes.size() > this->max_keyframes_) {
       this->keyframes.erase(this->keyframes.begin());
@@ -1786,7 +1789,7 @@ void dlio::OdomNode::buildKeyframesAndSubmap(State vehicle_state) {
     Eigen::Matrix4d Td = T.cast<double>();
 
     pcl::PointCloud<PointType>::Ptr transformed_keyframe = std::make_shared<pcl::PointCloud<PointType>>();
-    pcl::transformPointCloud (*raw_keyframe, *transformed_keyframe, T,false);
+    pcl::transformPointCloud (*raw_keyframe, *transformed_keyframe, T, false);
 
     std::shared_ptr<nano_gicp::CovarianceList> transformed_covariances (std::make_shared<nano_gicp::CovarianceList>(raw_covariances->size()));
     std::transform(raw_covariances->begin(), raw_covariances->end(), transformed_covariances->begin(),
