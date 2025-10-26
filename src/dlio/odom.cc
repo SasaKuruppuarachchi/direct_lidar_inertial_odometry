@@ -50,6 +50,9 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
   this->kf_cloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("kf_cloud", 1);
   this->deskewed_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("deskewed", 1);
 
+  this->pose_optmap_pub = this->create_publisher<custom_interfaces::msg::OptmapPose>("pose_optmap", 1000);
+  this->curr_deskewed_seq = 0;
+
   this->br = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
   this->publish_timer = this->create_wall_timer(std::chrono::duration<double>(0.01), 
@@ -457,6 +460,10 @@ void dlio::OdomNode::publishCloud(pcl::PointCloud<PointType>::ConstPtr published
   deskewed_ros.header.stamp = this->scan_header_stamp;
   deskewed_ros.header.frame_id = this->odom_frame;
   this->deskewed_pub->publish(deskewed_ros);
+
+  this->curr_deskewed_seq++;
+
+  this->publishOptmapPose();
 
 }
 
@@ -2025,4 +2032,32 @@ void dlio::OdomNode::debug() {
 
   std::cout << "+-------------------------------------------------------------------+" << std::endl;
 
+}
+
+void dlio::OdomNode::publishOptmapPose() {
+  custom_interfaces::msg::OptmapPose pose_ros;
+  pose_ros.id = this->curr_deskewed_seq;
+
+  if (!this->dlio_initialized) {
+    pose_ros.pose.position.x = 0;
+    pose_ros.pose.position.y = 0;
+    pose_ros.pose.position.z = 0;
+
+    pose_ros.pose.orientation.w = 0;
+    pose_ros.pose.orientation.x = 0;
+    pose_ros.pose.orientation.y = 0;
+    pose_ros.pose.orientation.z = 0;
+  }
+  else {
+    pose_ros.pose.position.x = this->state.p[0];
+    pose_ros.pose.position.y = this->state.p[1];
+    pose_ros.pose.position.z = this->state.p[2];
+
+    pose_ros.pose.orientation.w = this->state.q.w();
+    pose_ros.pose.orientation.x = this->state.q.x();
+    pose_ros.pose.orientation.y = this->state.q.y();
+    pose_ros.pose.orientation.z = this->state.q.z();
+  }
+
+  this->pose_optmap_pub->publish(pose_ros);
 }

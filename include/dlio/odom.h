@@ -38,6 +38,9 @@
 #include <pcl/surface/convex_hull.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+// OPTMAP
+#include "custom_interfaces/msg/optmap_pose.hpp"
+
 class dlio::OdomNode: public rclcpp::Node {
 
 public:
@@ -107,6 +110,10 @@ private:
   void pauseSubmapBuildIfNeeded();
 
   void debug();
+
+  void publishOptmapPose();
+  rclcpp::Publisher<custom_interfaces::msg::OptmapPose>::SharedPtr pose_optmap_pub;
+  int curr_deskewed_seq;
 
   rclcpp::TimerBase::SharedPtr publish_timer;
 

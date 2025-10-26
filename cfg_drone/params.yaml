@@ -56,4 +56,4 @@
     odom/geo/abias_max: 5.0
     odom/geo/gbias_max: 0.5
     odom/verbose: false
-    odom/keyframe/maxNum: 100
+    odom/keyframe/maxNum: 50

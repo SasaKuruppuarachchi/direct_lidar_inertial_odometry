@@ -60,6 +60,7 @@ def generate_launch_description():
             ('kf_pose', 'dlio/odom_node/keyframes'),
             ('kf_cloud', 'dlio/odom_node/pointcloud/keyframe'),
             ('deskewed', 'dlio/odom_node/pointcloud/deskewed'),
+            ('pose_optmap', 'dlio/odom_node/optmap_pose'),
         ],
     )
 
