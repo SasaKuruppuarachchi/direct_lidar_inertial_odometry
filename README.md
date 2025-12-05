@@ -93,6 +93,62 @@ To save DLIO's generated map into `.pcd` format, call the following service:
 ros2 service call /save_pcd direct_lidar_inertial_odometry/srv/SavePCD "{'leaf_size': 0.2, 'save_path': '~/map'}"
 ```
 
+## GICP diagnostics, pose covariance, and EKF (new)
+
+Legend
+
+- 🟢 healthy
+- 🟡 degraded
+- 🔴 rejected/ignored
+
+This branch adds alignment health checks, publishes pose covariance, and optionally fuses LiDAR with a lightweight EKF. All options are configured in `cfg/params.yaml` (and the `cfg_car/` and `cfg_drone/` profiles) under `ros__parameters`.
+
+- `odom/publishPoseCovariance` (bool, default: true)
+    - Publish a 6x6 pose covariance in `nav_msgs/Odometry.pose.covariance`.
+    - Order is [x y z roll pitch yaw] in row-major. Rotations are in radians.
+
+- GICP failure detection thresholds
+    - `odom/gicp/failure/condMax` (double, 1e7): Max allowed Hessian condition number.
+    - `odom/gicp/failure/minEig` (double, 1e-8): Min allowed Hessian eigenvalue.
+    - `odom/gicp/failure/fitnessPerPointMax` (double, 1.0): Max normalized error per inlier.
+    - `odom/gicp/failure/minInliers` (int, 200): Min required correspondences.
+    - If any threshold is violated, the frame is marked “bad alignment” (🔴).
+
+- `odom/gicp/ignoreBadAlignment` (bool, default: false)
+    - When true, DLIO will skip applying the LiDAR correction for frames flagged as bad to avoid corrupting the state (🔴 ignore).
+
+- EKF fusion controls (minimal error-state EKF)
+    - `odom/ekf/enable` (bool, false): Enable EKF fusion of LiDAR pose into the internal state.
+    - `odom/ekf/useGICPCovariance` (bool, true): Use the per-frame LiDAR pose covariance as the EKF measurement noise; otherwise, fall back to floors.
+    - `odom/ekf/measurement/nis_threshold` (double, 12.592): Statistical gate on the innovation (NIS). If NIS > threshold, the LiDAR update is rejected (🔴).
+    - Process noise (added per second on the diagonal of P):
+        - `odom/ekf/process/q_pos` (double, 1e-3)
+        - `odom/ekf/process/q_vel` (double, 1e-2)
+        - `odom/ekf/process/q_ori` (double, 1e-4)  # rad^2
+        - `odom/ekf/process/q_bg`  (double, 1e-6)
+        - `odom/ekf/process/q_ba`  (double, 1e-6)
+    - Measurement noise floors (applied even when using GICP covariance):
+        - `odom/ekf/measurement/r_pos_floor` (double, 1e-4)
+        - `odom/ekf/measurement/r_ori_floor` (double, 1e-4)  # rad^2
+
+- EKF predict model (full IMU linearization)
+    - The covariance prediction now uses the standard error-state linearization with continuous-time F and G matrices and IMU noise parameters.
+    - IMU noise parameters (standard deviations; continuous-time):
+        - `odom/ekf/process/noise_gyro` (double, 1.7e-4)       # rad/s / sqrt(Hz)
+        - `odom/ekf/process/noise_accel` (double, 2.0e-3)      # m/s^2 / sqrt(Hz)
+        - `odom/ekf/process/noise_gyro_bias` (double, 1.0e-5)  # rad/s^2 / sqrt(Hz)
+        - `odom/ekf/process/noise_accel_bias` (double, 1.0e-4) # m/s^3 / sqrt(Hz)
+    - Legacy diagonal q_* params remain for backward compatibility but are superseded by the above in the predict step.
+
+- Diagnostics topics (for monitoring)
+    - `alignment_good` (std_msgs/Bool): true if the last GICP alignment passed the configured thresholds.
+    - `ekf_nis` (std_msgs/Float64): innovation NIS of the last LiDAR update (published every time an EKF update is attempted).
+    - Typical interpretation: alignment_good=true (🟢), false (🔴); NIS within threshold (🟢/🟡) vs above threshold (🔴 rejected).
+
+Notes
+- The pose covariance is derived from the final GICP Hessian inverse, scaled by a normalized error metric, and reordered to ROS’s [x y z r p y].
+- The EKF here is intentionally lightweight and can be extended (e.g., IMU Jacobians, statistical gating) as needed.
+
 ### Test Data
 For your convenience, we provide test data [here](https://drive.google.com/file/d/1Sp_Mph4rekXKY2euxYxv6SD6WIzB-wVU/view?usp=sharing) (1.2GB, 1m 13s, Ouster OS1-32) of an aggressive motion to test our motion correction scheme, and [here](https://drive.google.com/file/d/1HbmF5gTHxCAMqBkEd5PTxDNQvcI8tKXn/view?usp=sharing) (16.5GB, 4m 21s, Ouster OSDome) of a longer trajectory outside with lots of trees. Try these two datasets with both deskewing on and off!
 

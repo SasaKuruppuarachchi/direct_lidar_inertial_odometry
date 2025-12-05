@@ -48,6 +48,31 @@
     odom/gicp/rotationEpsilon: 0.01
     odom/gicp/initLambdaFactor: 1e-9
 
+    # Publishing pose covariance and GICP failure handling
+    odom/publishPoseCovariance: true
+    odom/gicp/failure/condMax: 1.0e7
+    odom/gicp/failure/minEig: 1.0e-8
+    odom/gicp/failure/fitnessPerPointMax: 1.0
+    odom/gicp/failure/minInliers: 200
+    odom/gicp/ignoreBadAlignment: false
+
+    # EKF fusion controls
+    odom/ekf/enable: false
+    odom/ekf/useGICPCovariance: true
+    odom/ekf/measurement/nis_threshold: 12.592
+    odom/ekf/process/q_pos: 1.0e-3
+    odom/ekf/process/q_vel: 1.0e-2
+    odom/ekf/process/q_ori: 1.0e-4
+    odom/ekf/process/q_bg:  1.0e-6
+    odom/ekf/process/q_ba:  1.0e-6
+    # IMU noise parameters (std dev)
+    odom/ekf/process/noise_gyro: 1.7e-4
+    odom/ekf/process/noise_accel: 2.0e-3
+    odom/ekf/process/noise_gyro_bias: 1.0e-5
+    odom/ekf/process/noise_accel_bias: 1.0e-4
+    odom/ekf/measurement/r_pos_floor: 1.0e-4
+    odom/ekf/measurement/r_ori_floor: 1.0e-4
+
     odom/geo/Kp: 4.5
     odom/geo/Kv: 11.25
     odom/geo/Kq: 4.0

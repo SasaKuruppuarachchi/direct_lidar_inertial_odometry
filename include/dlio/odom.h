@@ -20,6 +20,8 @@
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 // BOOST
@@ -129,6 +131,9 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr kf_pose_pub;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr kf_cloud_pub;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr deskewed_pub;
+  // Diagnostics publishers
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr alignment_good_pub;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr ekf_nis_pub;
 
   // TF
   std::shared_ptr<tf2_ros::TransformBroadcaster> br;
@@ -148,6 +153,44 @@ private:
   std::atomic<bool> gicp_hasConverged;
   std::atomic<bool> deskew_status;
   std::atomic<int> deskew_size;
+
+  // GICP diagnostics and covariance
+  bool publish_pose_covariance_ = true;   // whether to publish pose covariance in odom
+  double gicp_fail_cond_max_ = 1e7;       // max allowed Hessian condition number
+  double gicp_fail_min_eig_ = 1e-8;       // min allowed Hessian eigenvalue
+  double gicp_fail_fitness_per_pt_max_ = 1.0; // max allowed normalized error per inlier
+  int gicp_fail_min_inliers_ = 200;       // min required correspondences
+  bool last_alignment_good_ = true;       // last GICP alignment health
+  Eigen::Matrix<double,6,6> last_pose_cov_; // last pose covariance [x y z r p y] ordering
+  bool last_pose_cov_valid_ = false;
+
+  // Frame handling and EKF
+  bool gicp_ignore_bad_alignment_ = false; // if true, ignore bad alignment frames
+  bool ekf_enable_ = false;                // if true, run EKF fusion
+  bool ekf_use_gicp_cov_ = true;           // if true, use GICP covariance for R
+  double ekf_nis_threshold_ = 12.592;      // NIS gating threshold (chi-square 95% for 6 dof)
+  double ekf_last_nis_ = 0.0;              // last computed NIS value
+
+  // EKF covariance and noise (15x15 error-state: [dp dv dtheta dbg dba])
+  Eigen::Matrix<double,15,15> ekf_P_;
+  // Legacy diagonal process noise (kept for backward compatibility)
+  double ekf_q_pos_ = 1e-3;
+  double ekf_q_vel_ = 1e-2;
+  double ekf_q_ori_ = 1e-4;
+  double ekf_q_bg_  = 1e-6;
+  double ekf_q_ba_  = 1e-6;
+  // Continuous-time IMU noise parameters for full predict (standard deviations)
+  double ekf_noise_gyro_        = 1.7e-4;  // rad/s / sqrt(Hz)
+  double ekf_noise_accel_       = 2.0e-3;  // m/s^2 / sqrt(Hz)
+  double ekf_noise_gyro_bias_   = 1.0e-5;  // rad/s^2 / sqrt(Hz)
+  double ekf_noise_accel_bias_  = 1.0e-4;  // m/s^3 / sqrt(Hz)
+  double ekf_r_pos_floor_ = 1e-4;  // minimum measurement noise for position
+  double ekf_r_ori_floor_ = 1e-4;  // minimum measurement noise for orientation
+
+  // EKF helpers
+  void ekfPredict(double dt);
+  void ekfUpdateFromLidar(const Eigen::Vector3f& z_p, const Eigen::Quaternionf& z_q,
+                          const Eigen::Matrix<double,6,6>& R, bool* update_accepted=nullptr);
 
   // Threads
   std::thread publish_thread;

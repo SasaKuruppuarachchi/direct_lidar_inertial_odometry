@@ -12,7 +12,11 @@
 
 #include "dlio/odom.h"
 #include "dlio/utils.h"
+#include <Eigen/Eigenvalues>
+#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/float64.hpp>
 
+#include <limits>
 #include <queue>
 
 #include "rclcpp/qos.hpp"
@@ -49,6 +53,8 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
   this->kf_pose_pub  = this->create_publisher<geometry_msgs::msg::PoseArray>("kf_pose", 1);
   this->kf_cloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("kf_cloud", 1);
   this->deskewed_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("deskewed", 1);
+  this->alignment_good_pub = this->create_publisher<std_msgs::msg::Bool>("alignment_good", 10);
+  this->ekf_nis_pub = this->create_publisher<std_msgs::msg::Float64>("ekf_nis", 10);
 
   this->pose_optmap_pub = this->create_publisher<custom_interfaces::msg::OptmapPose>("pose_optmap", 1000);
   this->curr_deskewed_seq = 0;
@@ -57,6 +63,17 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
 
   this->publish_timer = this->create_wall_timer(std::chrono::duration<double>(0.01), 
       std::bind(&dlio::OdomNode::publishPose, this));
+
+  // Initialize EKF covariance
+  this->ekf_P_.setZero();
+  // Reasonable starting uncertainties
+  for (int i = 0; i < 3; ++i) {
+    this->ekf_P_(i,i) = 1e-2;        // position
+    this->ekf_P_(3+i,3+i) = 1e-1;    // velocity
+    this->ekf_P_(6+i,6+i) = 1e-3;    // orientation
+    this->ekf_P_(9+i,9+i) = 1e-4;    // gyro bias
+    this->ekf_P_(12+i,12+i) = 1e-4;  // accel bias
+  }
 
   this->T = Eigen::Matrix4f::Identity();
   this->T_prior = Eigen::Matrix4f::Identity();
@@ -309,6 +326,33 @@ void dlio::OdomNode::getParams() {
   dlio::declare_param(this, "odom/geo/gbias_max", this->geo_gbias_max_, 1.0);
   dlio::declare_param(this, "odom/keyframe/maxNum", this->max_keyframes_, 20);
   dlio::declare_param(this, "odom/verbose", this->verbose_, true);
+
+  // GICP diagnostics and covariance publishing
+  dlio::declare_param(this, "odom/publishPoseCovariance", this->publish_pose_covariance_, true);
+  dlio::declare_param(this, "odom/gicp/failure/condMax", this->gicp_fail_cond_max_, 1e7);
+  dlio::declare_param(this, "odom/gicp/failure/minEig", this->gicp_fail_min_eig_, 1e-8);
+  dlio::declare_param(this, "odom/gicp/failure/fitnessPerPointMax", this->gicp_fail_fitness_per_pt_max_, 1.0);
+  dlio::declare_param(this, "odom/gicp/failure/minInliers", this->gicp_fail_min_inliers_, 200);
+
+  // Controls for ignoring bad alignments and enabling EKF
+  dlio::declare_param(this, "odom/gicp/ignoreBadAlignment", this->gicp_ignore_bad_alignment_, false);
+  dlio::declare_param(this, "odom/ekf/enable", this->ekf_enable_, false);
+  dlio::declare_param(this, "odom/ekf/useGICPCovariance", this->ekf_use_gicp_cov_, true);
+  dlio::declare_param(this, "odom/ekf/measurement/nis_threshold", this->ekf_nis_threshold_, 12.592);
+
+  // EKF noise floors
+  dlio::declare_param(this, "odom/ekf/process/q_pos", this->ekf_q_pos_, 1e-3);
+  dlio::declare_param(this, "odom/ekf/process/q_vel", this->ekf_q_vel_, 1e-2);
+  dlio::declare_param(this, "odom/ekf/process/q_ori", this->ekf_q_ori_, 1e-4);
+  dlio::declare_param(this, "odom/ekf/process/q_bg",  this->ekf_q_bg_,  1e-6);
+  dlio::declare_param(this, "odom/ekf/process/q_ba",  this->ekf_q_ba_,  1e-6);
+  // Continuous-time IMU noise (std dev)
+  dlio::declare_param(this, "odom/ekf/process/noise_gyro",       this->ekf_noise_gyro_, 1.7e-4);
+  dlio::declare_param(this, "odom/ekf/process/noise_accel",      this->ekf_noise_accel_, 2.0e-3);
+  dlio::declare_param(this, "odom/ekf/process/noise_gyro_bias",  this->ekf_noise_gyro_bias_, 1.0e-5);
+  dlio::declare_param(this, "odom/ekf/process/noise_accel_bias", this->ekf_noise_accel_bias_, 1.0e-4);
+  dlio::declare_param(this, "odom/ekf/measurement/r_pos_floor", this->ekf_r_pos_floor_, 1e-4);
+  dlio::declare_param(this, "odom/ekf/measurement/r_ori_floor", this->ekf_r_ori_floor_, 1e-4);
 }
 
 void dlio::OdomNode::start() {
@@ -350,7 +394,21 @@ void dlio::OdomNode::publishPose() {
   this->odom_ros.twist.twist.angular.y = this->state.v.ang.b[1];
   this->odom_ros.twist.twist.angular.z = this->state.v.ang.b[2];
 
+  // Populate pose covariance if available
+  if (this->publish_pose_covariance_ && this->last_pose_cov_valid_) {
+    // nav_msgs::Odometry pose.covariance is row-major 6x6 in order [x y z r p y]
+    for (int r = 0; r < 6; ++r) {
+      for (int c = 0; c < 6; ++c) {
+        this->odom_ros.pose.covariance[r*6 + c] = this->last_pose_cov_(r, c);
+      }
+    }
+  } else {
+    // Leave as default (zeros) if not publishing
+  }
+
   this->odom_pub->publish(this->odom_ros);
+
+  // Optionally, one could publish a status if alignment was bad; left for later
 
   // geometry_msgs::msg::PoseStamped
   this->pose_ros.header.stamp = this->imu_stamp;
@@ -980,19 +1038,24 @@ void dlio::OdomNode::callbackImu(const sensor_msgs::msg::Imu::SharedPtr imu_raw)
       }
 
       this->imu_calibrated = true;
+      // Reset IMU time base after calibration to avoid a large first dt
+      this->prev_imu_stamp = imu_stamp_secs;
 
     }
 
   } else {
 
     double dt = imu_stamp_secs - this->prev_imu_stamp;
-    if (dt == 0) { dt = 1.0/200.0; }
+    // Guard against stale or non-monotonic timestamps
+    if (this->prev_imu_stamp <= 0.0 || dt <= 0.0 || dt > 0.2) {
+      dt = 1.0/200.0;
+    }
+    this->prev_imu_stamp = imu_stamp_secs;
     this->imu_rates.push_back( 1./dt );
 
     // Apply the calibrated bias to the new IMU measurements
     this->imu_meas.stamp = imu_stamp_secs;
     this->imu_meas.dt = dt;
-    this->prev_imu_stamp = this->imu_meas.stamp;
 
     Eigen::Vector3f lin_accel_corrected = (this->imu_accel_sm_ * lin_accel) - this->state.b.accel;
     Eigen::Vector3f ang_vel_corrected = ang_vel - this->state.b.gyro;
@@ -1011,6 +1074,10 @@ void dlio::OdomNode::callbackImu(const sensor_msgs::msg::Imu::SharedPtr imu_raw)
     if (this->geo.first_opt_done) {
       // Geometric Observer: Propagate State
       this->propagateState();
+      // EKF: propagate covariance
+      if (this->ekf_enable_) {
+        this->ekfPredict(this->imu_meas.dt);
+      }
     }
 
   }
@@ -1040,16 +1107,161 @@ void dlio::OdomNode::getNextPose() {
   pcl::PointCloud<PointType>::Ptr aligned = std::make_shared<pcl::PointCloud<PointType>>();
   this->gicp.align(*aligned);
 
+  const bool gicp_converged = this->gicp.hasConverged();
+  const int inliers = std::max(0, this->gicp.num_correspondences);
+
+  // --- GICP diagnostics and pose covariance (Hessian-based) ---
+  if (!gicp_converged) {
+    this->last_alignment_good_ = false;
+    this->last_pose_cov_valid_ = false;
+    if (this->alignment_good_pub) {
+      std_msgs::msg::Bool b; b.data = false; this->alignment_good_pub->publish(b);
+    }
+  } else try {
+    // Retrieve final Hessian (6x6, order: [rot(x,y,z), trans(x,y,z)]) and final error
+    const Eigen::Matrix<double,6,6>& H = this->gicp.getFinalHessian();
+    const double final_err = this->gicp.getFinalError();
+
+    // Symmetrize Hessian for numerical stability
+    Eigen::Matrix<double,6,6> Hs = 0.5 * (H + H.transpose());
+
+    // Eigenvalues for condition number and min eigenvalue
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,6,6>> es(Hs);
+    if (es.info() == Eigen::Success) {
+      double lam_min = std::max(1e-18, es.eigenvalues().minCoeff());
+      double lam_max = std::max(lam_min, es.eigenvalues().maxCoeff());
+      double cond = lam_max / lam_min;
+
+      // Fitness per inlier (normalized)
+      double fitness_per_pt = (inliers > 6) ? (final_err / static_cast<double>(inliers - 6)) : std::numeric_limits<double>::infinity();
+
+      bool bad_cond = cond > this->gicp_fail_cond_max_;
+      bool bad_min_eig = lam_min < this->gicp_fail_min_eig_;
+      bool bad_fitness = fitness_per_pt > this->gicp_fail_fitness_per_pt_max_;
+      bool bad_inliers = inliers < this->gicp_fail_min_inliers_;
+
+      this->last_alignment_good_ = !(bad_cond || bad_min_eig || bad_fitness || bad_inliers);
+      // Publish alignment health diagnostic
+      if (this->alignment_good_pub) {
+        std_msgs::msg::Bool b; b.data = this->last_alignment_good_; this->alignment_good_pub->publish(b);
+      }
+
+      // Compute covariance if alignment is numerically stable
+      if (this->publish_pose_covariance_ && !bad_min_eig) {
+        // Robust inverse using LDLT with small damping if needed
+        Eigen::Matrix<double,6,6> H_damped = Hs;
+        double damping = 0.0;
+        if (!this->last_alignment_good_) {
+          damping = 1e-6;
+        }
+        H_damped.diagonal().array() += damping;
+        Eigen::LDLT<Eigen::Matrix<double,6,6>> ldlt(H_damped);
+        if (ldlt.info() == Eigen::Success) {
+          Eigen::Matrix<double,6,6> Hinv = ldlt.solve(Eigen::Matrix<double,6,6>::Identity());
+          // Scale estimate
+          double sigma2 = (inliers > 6) ? std::max(1e-12, fitness_per_pt) : 1.0;
+          Eigen::Matrix<double,6,6> Sigma_rt = sigma2 * Hinv; // [rot, trans]
+
+          // Reorder to ROS order: [x,y,z,roll,pitch,yaw]
+          Eigen::Matrix<double,6,6> Sigma_ros;
+          // Blocks
+          Eigen::Matrix<double,3,3> S_rr = Sigma_rt.block<3,3>(0,0);
+          Eigen::Matrix<double,3,3> S_tt = Sigma_rt.block<3,3>(3,3);
+          Eigen::Matrix<double,3,3> S_tr = Sigma_rt.block<3,3>(3,0);
+          Eigen::Matrix<double,3,3> S_rt = Sigma_rt.block<3,3>(0,3);
+          Sigma_ros.topLeftCorner<3,3>() = S_tt;               // pos-pos
+          Sigma_ros.topRightCorner<3,3>() = S_tr;              // pos-rot
+          Sigma_ros.bottomLeftCorner<3,3>() = S_rt;            // rot-pos
+          Sigma_ros.bottomRightCorner<3,3>() = S_rr;           // rot-rot
+
+          // Enforce symmetry and non-negative variances
+          Sigma_ros = 0.5 * (Sigma_ros + Sigma_ros.transpose());
+          for (int d = 0; d < 6; ++d) {
+            Sigma_ros(d,d) = std::max(Sigma_ros(d,d), 1e-12);
+          }
+
+          // Store
+          this->last_pose_cov_ = Sigma_ros;
+          this->last_pose_cov_valid_ = true;
+        } else {
+          this->last_pose_cov_valid_ = false;
+        }
+      } else {
+        this->last_pose_cov_valid_ = false;
+      }
+
+      // Optional: log warnings when alignment looks bad
+      if (!this->last_alignment_good_ && this->verbose_) {
+        RCLCPP_WARN(this->get_logger(), "GICP alignment flagged: cond=%.2e minEig=%.2e fit/pt=%.3g inliers=%d",
+                    cond, es.eigenvalues().minCoeff(), fitness_per_pt, inliers);
+      }
+    } else {
+      this->last_alignment_good_ = false;
+      this->last_pose_cov_valid_ = false;
+      if (this->alignment_good_pub) {
+        std_msgs::msg::Bool b; b.data = false; this->alignment_good_pub->publish(b);
+      }
+    }
+  } catch (...) {
+    // Defensive: if anything fails, mark invalid
+    this->last_alignment_good_ = false;
+    this->last_pose_cov_valid_ = false;
+    if (this->alignment_good_pub) {
+      std_msgs::msg::Bool b; b.data = false; this->alignment_good_pub->publish(b);
+    }
+  }
+
   // Get final transformation in global frame
   this->T_corr = this->gicp.getFinalTransformation(); // "correction" transformation
+
+  // Optionally ignore bad alignments by discarding correction
+  if (this->gicp_ignore_bad_alignment_ && !this->last_alignment_good_) {
+    this->T_corr = Eigen::Matrix4f::Identity();
+  }
   this->T = this->T_corr * this->T_prior;
 
   // Update next global pose
   // Both source and target clouds are in the global frame now, so tranformation is global
-  this->propagateGICP();
+  if (this->gicp_ignore_bad_alignment_ && !this->last_alignment_good_) {
+    // If we're ignoring this alignment, keep lidarPose at current state pose
+    this->lidarPose.p = this->state.p;
+    this->lidarPose.q = this->state.q;
+  } else {
+    this->propagateGICP();
+  }
 
-  // Geometric observer update
-  this->updateState();
+  // Fuse measurement
+  if (this->ekf_enable_) {
+    if ((!this->gicp_ignore_bad_alignment_ || this->last_alignment_good_)) {
+      // EKF update from lidar with R from GICP (or floors only)
+      Eigen::Matrix<double,6,6> R = Eigen::Matrix<double,6,6>::Zero();
+      if (this->ekf_use_gicp_cov_ && this->last_pose_cov_valid_) {
+        R = this->last_pose_cov_;
+      }
+      // Always apply floors (and build diagonal if R was zero)
+      for (int i = 0; i < 3; ++i) {
+        R(i,i) = std::max(R(i,i), this->ekf_r_pos_floor_);
+        R(3+i,3+i) = std::max(R(3+i,3+i), this->ekf_r_ori_floor_);
+      }
+      bool accepted = false;
+      this->ekfUpdateFromLidar(this->lidarPose.p, this->lidarPose.q, R, &accepted);
+      // If accepted, reflect updated state in T as well
+      Eigen::Matrix3f Rw = this->state.q.toRotationMatrix();
+      this->T.setIdentity();
+      this->T.block<3,3>(0,0) = Rw;
+      this->T.block<3,1>(0,3) = this->state.p;
+    } else {
+      // No EKF update; fall back to geometric observer if enabled and alignment good
+      if (!(this->gicp_ignore_bad_alignment_ && !this->last_alignment_good_)) {
+        this->updateState();
+      }
+    }
+  } else {
+    // Geometric observer update only when not ignoring bad alignment
+    if (!(this->gicp_ignore_bad_alignment_ && !this->last_alignment_good_)) {
+      this->updateState();
+    }
+  }
 
 }
 
@@ -1425,6 +1637,144 @@ sensor_msgs::msg::Imu::SharedPtr dlio::OdomNode::transformImu(const sensor_msgs:
 
   return imu;
 
+}
+
+// -------------------- EKF helpers --------------------
+static inline Eigen::Matrix3d skew3(const Eigen::Vector3d& v) {
+  Eigen::Matrix3d S;
+  S << 0, -v.z(), v.y(),
+       v.z(), 0, -v.x(),
+      -v.y(), v.x(), 0;
+  return S;
+}
+
+void dlio::OdomNode::ekfPredict(double dt) {
+  if (dt <= 0.0) return;
+
+  // Nominal quantities
+  Eigen::Matrix3d Rwb = this->state.q.cast<double>().toRotationMatrix();
+  Eigen::Vector3d omega = this->imu_meas.ang_vel.cast<double>();  // already bias-corrected
+  Eigen::Vector3d acc   = this->imu_meas.lin_accel.cast<double>(); // already bias-corrected
+
+  // Continuous-time error-state dynamics: x = [dp dv dtheta dbg dba]
+  Eigen::Matrix<double,15,15> F = Eigen::Matrix<double,15,15>::Zero();
+  // dp_dot = dv
+  F.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+  // dv_dot = -R [a]_x dtheta - R dba
+  F.block<3,3>(3,6) = -Rwb * skew3(acc);
+  F.block<3,3>(3,12) = -Rwb;
+  // dtheta_dot = -[omega]_x dtheta - dbg
+  F.block<3,3>(6,6) = -skew3(omega);
+  F.block<3,3>(6,9) = -Eigen::Matrix3d::Identity();
+  // bias random walks are zero in F
+
+  // Noise mapping G (to noises: [n_g, n_a, n_bg, n_ba])
+  Eigen::Matrix<double,15,12> G = Eigen::Matrix<double,15,12>::Zero();
+  // gyro noise to attitude
+  G.block<3,3>(6,0) = -Eigen::Matrix3d::Identity();
+  // accel noise to velocity
+  G.block<3,3>(3,3) = -Rwb;
+  // gyro bias RW to bg
+  G.block<3,3>(9,6) = Eigen::Matrix3d::Identity();
+  // accel bias RW to ba
+  G.block<3,3>(12,9) = Eigen::Matrix3d::Identity();
+
+  // Continuous-time noise covariance Qc
+  const double sg2  = this->ekf_noise_gyro_ * this->ekf_noise_gyro_;
+  const double sa2  = this->ekf_noise_accel_ * this->ekf_noise_accel_;
+  const double sbg2 = this->ekf_noise_gyro_bias_ * this->ekf_noise_gyro_bias_;
+  const double sba2 = this->ekf_noise_accel_bias_ * this->ekf_noise_accel_bias_;
+  Eigen::Matrix<double,12,12> Qc = Eigen::Matrix<double,12,12>::Zero();
+  Qc.block<3,3>(0,0) = sg2 * Eigen::Matrix3d::Identity();
+  Qc.block<3,3>(3,3) = sa2 * Eigen::Matrix3d::Identity();
+  Qc.block<3,3>(6,6) = sbg2 * Eigen::Matrix3d::Identity();
+  Qc.block<3,3>(9,9) = sba2 * Eigen::Matrix3d::Identity();
+
+  // Discretization (first-order)
+  Eigen::Matrix<double,15,15> Phi = Eigen::Matrix<double,15,15>::Identity() + F * dt;
+  Eigen::Matrix<double,15,15> Qd = (G * Qc * G.transpose()) * dt;
+
+  // Propagate covariance
+  this->ekf_P_ = Phi * this->ekf_P_ * Phi.transpose() + Qd;
+}
+
+static inline Eigen::Vector3d quatLogSmall(const Eigen::Quaterniond& q) {
+  Eigen::Quaterniond qq = q;
+  if (qq.w() < 0) { qq.coeffs() *= -1.0; }
+  double w = std::min(1.0, std::max(-1.0, qq.w()));
+  double theta = 2.0 * std::acos(w);
+  double s = std::sqrt(std::max(1e-16, 1.0 - w*w));
+  Eigen::Vector3d v(qq.x(), qq.y(), qq.z());
+  if (s < 1e-8) {
+    return 2.0 * v; // small angle approx
+  } else {
+    return (theta / s) * v;
+  }
+}
+
+void dlio::OdomNode::ekfUpdateFromLidar(const Eigen::Vector3f& z_p_f, const Eigen::Quaternionf& z_q_f,
+                          const Eigen::Matrix<double,6,6>& R_in, bool* update_accepted) {
+  // Build residual r = [p_meas - p_hat; log(q_hat^{-1} * q_meas)]
+  Eigen::Vector3d z_p = z_p_f.cast<double>();
+  Eigen::Quaterniond z_q(z_q_f.w(), z_q_f.x(), z_q_f.y(), z_q_f.z());
+
+  Eigen::Vector3d p_hat = this->state.p.cast<double>();
+  Eigen::Quaterniond q_hat(this->state.q.w(), this->state.q.x(), this->state.q.y(), this->state.q.z());
+
+  Eigen::Matrix<double,6,1> r;
+  r.head<3>() = z_p - p_hat;
+  Eigen::Quaterniond q_err = q_hat.conjugate() * z_q;
+  r.tail<3>() = quatLogSmall(q_err);
+
+  // H matrix (6x15): [ I3  0  0  0  0 ; 0  0  I3  0  0 ]
+  Eigen::Matrix<double,6,15> H = Eigen::Matrix<double,6,15>::Zero();
+  H.block<3,3>(0,0) = Eigen::Matrix3d::Identity();
+  H.block<3,3>(3,6) = Eigen::Matrix3d::Identity();
+
+  Eigen::Matrix<double,6,6> S = H * this->ekf_P_ * H.transpose() + R_in;
+  S = 0.5 * (S + S.transpose());
+  // Compute NIS and publish for diagnostics
+  Eigen::LDLT<Eigen::Matrix<double,6,6>> ldltS(S);
+  if (ldltS.info() != Eigen::Success) {
+    if (update_accepted) { *update_accepted = false; }
+    return;
+  }
+  Eigen::Matrix<double,6,1> Sinv_r = ldltS.solve(r);
+  double nis = r.dot(Sinv_r);
+  this->ekf_last_nis_ = nis;
+  if (this->ekf_nis_pub) {
+    std_msgs::msg::Float64 msg; msg.data = nis; this->ekf_nis_pub->publish(msg);
+  }
+  // Statistical gating
+  if (nis > this->ekf_nis_threshold_) {
+    if (update_accepted) { *update_accepted = false; }
+    return; // reject update
+  }
+
+  Eigen::Matrix<double,15,6> K = this->ekf_P_ * H.transpose() * ldltS.solve(Eigen::Matrix<double,6,6>::Identity());
+  Eigen::Matrix<double,15,1> dx = K * r;
+
+  // Inject into nominal state
+  this->state.p += dx.segment<3>(0).cast<float>();
+  // velocity unchanged here
+  Eigen::Vector3d dtheta = dx.segment<3>(6);
+  double angle = dtheta.norm();
+  Eigen::Quaterniond dq = (angle < 1e-12)
+    ? Eigen::Quaterniond(1.0, 0.5*dtheta.x(), 0.5*dtheta.y(), 0.5*dtheta.z())
+    : Eigen::Quaterniond(Eigen::AngleAxisd(angle, dtheta/angle));
+  Eigen::Quaterniond q_new = dq * q_hat;
+  q_new.normalize();
+  this->state.q = Eigen::Quaternionf(q_new.w(), q_new.x(), q_new.y(), q_new.z());
+  // biases
+  this->state.b.gyro  += dx.segment<3>(9).cast<float>();
+  this->state.b.accel += dx.segment<3>(12).cast<float>();
+
+  // Covariance update (Joseph form)
+  Eigen::Matrix<double,15,15> I = Eigen::Matrix<double,15,15>::Identity();
+  Eigen::Matrix<double,15,15> IKH = I - K * H;
+  this->ekf_P_ = IKH * this->ekf_P_ * IKH.transpose() + K * R_in * K.transpose();
+
+  if (update_accepted) { *update_accepted = true; }
 }
 
 void dlio::OdomNode::computeMetrics() {
