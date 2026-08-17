@@ -80,5 +80,5 @@
     odom/geo/Kgb: 1.0
     odom/geo/abias_max: 5.0
     odom/geo/gbias_max: 0.5
-    odom/verbose: false
+    odom/verbose: true
     odom/keyframe/maxNum: 50
