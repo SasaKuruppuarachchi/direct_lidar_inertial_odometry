@@ -22,7 +22,7 @@ def generate_launch_description():
     rviz = LaunchConfiguration('rviz', default='true')
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     pointcloud_topic = LaunchConfiguration('pointcloud_topic', default='/drone0/livox/lidar')
-    imu_topic = LaunchConfiguration('imu_topic', default='/drone0/sensor_measurements/imu')
+    imu_topic = LaunchConfiguration('imu_topic', default='/drone0/px4_imu')
 
     # Define arguments
     declare_rviz_arg = DeclareLaunchArgument(
