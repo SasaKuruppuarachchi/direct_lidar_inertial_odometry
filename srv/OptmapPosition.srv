@@ -1,0 +1,15 @@
+int32 num_scans
+float32[] x
+float32[] y
+float32[] z
+float32[] r
+string output_folder
+bool save_features
+bool pub_pose
+bool save_pose
+bool pub_map
+bool save_map
+bool pub_scans
+bool save_scans
+---
+bool success

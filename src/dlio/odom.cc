@@ -56,7 +56,7 @@ dlio::OdomNode::OdomNode() : Node("dlio_odom_node") {
   this->alignment_good_pub = this->create_publisher<std_msgs::msg::Bool>("alignment_good", 10);
   this->ekf_nis_pub = this->create_publisher<std_msgs::msg::Float64>("ekf_nis", 10);
 
-  this->pose_optmap_pub = this->create_publisher<custom_interfaces::msg::OptmapPose>("pose_optmap", 1000);
+  this->pose_optmap_pub = this->create_publisher<direct_lidar_inertial_odometry::msg::OptmapPose>("pose_optmap", 1000);
   this->curr_deskewed_seq = 0;
 
   this->br = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
@@ -2385,7 +2385,7 @@ void dlio::OdomNode::debug() {
 }
 
 void dlio::OdomNode::publishOptmapPose() {
-  custom_interfaces::msg::OptmapPose pose_ros;
+  direct_lidar_inertial_odometry::msg::OptmapPose pose_ros;
   pose_ros.id = this->curr_deskewed_seq;
 
   if (!this->dlio_initialized) {

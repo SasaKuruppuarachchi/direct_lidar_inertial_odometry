@@ -161,7 +161,7 @@ Visualization Manager:
           Size (Pixels): 1
           Size (m): 0.05000000074505806
           Style: Points
-          Topic: /dlio/map_node/map
+          Topic: /map
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true

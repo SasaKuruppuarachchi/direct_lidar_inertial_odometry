@@ -41,7 +41,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 
 // OPTMAP
-#include "custom_interfaces/msg/optmap_pose.hpp"
+#include "direct_lidar_inertial_odometry/msg/optmap_pose.hpp"
 
 class dlio::OdomNode: public rclcpp::Node {
 
@@ -114,7 +114,7 @@ private:
   void debug();
 
   void publishOptmapPose();
-  rclcpp::Publisher<custom_interfaces::msg::OptmapPose>::SharedPtr pose_optmap_pub;
+  rclcpp::Publisher<direct_lidar_inertial_odometry::msg::OptmapPose>::SharedPtr pose_optmap_pub;
   int curr_deskewed_seq;
 
   rclcpp::TimerBase::SharedPtr publish_timer;
